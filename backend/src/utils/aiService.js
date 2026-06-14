@@ -312,7 +312,7 @@ Your response:`;
   }
 
   async useOpenAICompatibleChat(prompt, settings, options = {}) {
-    const { default: OpenAI } = await import('openai');
+    const { default: fetch } = await import('node-fetch');
     
     if (!settings.apiKey) {
       throw new Error(`${options.providerName || 'AI provider'} API key not configured`);
@@ -320,26 +320,23 @@ Your response:`;
 
     const provider = settings.provider || 'openai';
     const baseUrl = settings.apiUrl || options.defaultBaseUrl;
-    const validatedBaseUrl = baseUrl
-      ? (await validateAiProviderUrl(provider, baseUrl)).toString()
-      : undefined;
-
-    const openai = new OpenAI({
-      apiKey: settings.apiKey,
-      baseURL: validatedBaseUrl
-    });
+    if (!baseUrl) {
+      throw new Error(`${options.providerName || 'AI provider'} base URL not configured`);
+    }
+    const validatedBaseUrl = await validateAiProviderUrl(provider, baseUrl);
 
     const providerName = options.providerName || 'OpenAI-compatible';
     const model = settings.model || options.defaultModel || 'gpt-4o';
+    const url = `${validatedBaseUrl.toString().replace(/\/$/, '')}/chat/completions`;
     console.log(`[${providerName.toUpperCase()}] ${providerName}: Using model ${model}`);
+    console.log(`[${providerName.toUpperCase()}] URL:`, summarizeUrlForLogging(url));
 
     try {
-      // Build request parameters
       const tokenParam = provider === 'openai'
         ? { max_completion_tokens: options.maxTokens || 1000 }
         : { max_tokens: options.maxTokens || 1000 };
 
-      const requestParams = {
+      const requestBody = {
         model: model,
         messages: [
           {
@@ -354,24 +351,38 @@ Your response:`;
       // Reasoning models (o-series, all gpt-5 variants) reject any non-default temperature.
       const isReasoningModel = /^(o\d|gpt-5|deepseek-reasoner)/i.test(model);
       if (!isReasoningModel) {
-        requestParams.temperature = 0.1;
+        requestBody.temperature = 0.1;
       }
       
-      const response = await openai.chat.completions.create(requestParams);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${settings.apiKey}`
+        },
+        body: JSON.stringify(requestBody)
+      });
 
-      if (!response) {
-        throw new Error('No response received from OpenAI API');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`${providerName} API error: ${response.status} ${response.statusText}${errorText ? ' - ' + errorText.slice(0, 500) : ''}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data) {
+        throw new Error(`No response received from ${providerName} API`);
       }
       
-      if (!response.choices || response.choices.length === 0) {
-        throw new Error('No choices in OpenAI response');
+      if (!data.choices || data.choices.length === 0) {
+        throw new Error(`No choices in ${providerName} response`);
       }
       
-      if (!response.choices[0].message) {
-        throw new Error('No message in OpenAI response choice');
+      if (!data.choices[0].message) {
+        throw new Error(`No message in ${providerName} response choice`);
       }
       
-      const content = response.choices[0].message.content;
+      const content = data.choices[0].message.content;
       console.log(`[${providerName.toUpperCase()}] Completion received:`, content ? 'SUCCESS' : 'EMPTY');
       
       return content;
