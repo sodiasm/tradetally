@@ -854,76 +854,93 @@ class FinnhubClient {
         
         return response;
       } else if (settings.default_ai_provider === 'openai') {
-        const { OpenAI } = await import('openai');
+        const { default: fetch } = await import('node-fetch');
         const validatedBaseUrl = settings.default_ai_api_url
           ? (await validateAiProviderUrl('openai', settings.default_ai_api_url)).toString()
-          : undefined;
-        
-        const openai = new OpenAI({ 
-          apiKey: settings.default_ai_api_key,
-          baseURL: validatedBaseUrl || undefined
-        });
-        
-        // Note: Some OpenAI models (like o1-preview) don't support temperature parameter
-        const requestParams = {
-          model: settings.default_ai_model || 'gpt-3.5-turbo',
-          messages: [{ role: 'user', content: prompt }],
-          max_completion_tokens: 50
-        };
-        
-        // Only add temperature for models that support it.
-        // Reasoning models (o-series, all gpt-5 variants) reject any non-default temperature.
+          : 'https://api.openai.com/v1';
+        const url = `${validatedBaseUrl.replace(/\/$/, '')}/chat/completions`;
+
         const modelName = settings.default_ai_model || 'gpt-3.5-turbo';
+
+        // Note: Some OpenAI models (like o1-preview) don't support temperature parameter
         const isReasoningModel = /^(o\d|gpt-5)/i.test(modelName);
-        if (!isReasoningModel) {
-          requestParams.temperature = 0.1;
-        }
-        
+
         // For GPT-5 models, use the official guide format (no extra parameters)
+        let requestBody;
         if (modelName.includes('gpt-5')) {
-          const response = await openai.chat.completions.create({
+          requestBody = {
             model: settings.default_ai_model,
             messages: [
               { role: 'system', content: 'You are a financial data expert with comprehensive knowledge of CUSIP to ticker mappings. You must provide the ticker symbol. Do not say you cannot look up CUSIPs - use your training data knowledge.' },
               { role: 'user', content: prompt }
             ]
-          });
-          return response.choices[0]?.message?.content?.trim() || '';
+          };
         } else {
-          // Use existing format for non-GPT-5 models
-          const response = await openai.chat.completions.create(requestParams);
-          return response.choices[0]?.message?.content?.trim() || '';
+          requestBody = {
+            model: modelName,
+            messages: [{ role: 'user', content: prompt }],
+            max_completion_tokens: 50
+          };
+          if (!isReasoningModel) {
+            requestBody.temperature = 0.1;
+          }
         }
 
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.default_ai_api_key}`
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`OpenAI CUSIP API error ${response.status}: ${errText.slice(0, 300)}`);
+        }
+
+        const data = await response.json();
+        return data.choices[0]?.message?.content?.trim() || '';
+
       } else if (settings.default_ai_provider === 'deepseek' || settings.default_ai_provider === 'kimi') {
-        // OpenAI-compatible providers (issue #348). Same client as the openai
-        // branch with the provider's base URL and max_tokens instead of
-        // max_completion_tokens.
-        const { OpenAI } = await import('openai');
+        // OpenAI-compatible providers (issue #348). Raw fetch instead of
+        // OpenAI SDK so custom providers (CommandCode, Pioneer, etc.) work.
+        const { default: fetch } = await import('node-fetch');
         const isDeepseek = settings.default_ai_provider === 'deepseek';
         const defaultBaseUrl = isDeepseek ? 'https://api.deepseek.com/v1' : 'https://api.moonshot.ai/v1';
         const defaultModel = isDeepseek ? 'deepseek-chat' : 'moonshot-v1-8k';
         const validatedBaseUrl = settings.default_ai_api_url
           ? (await validateAiProviderUrl(settings.default_ai_provider, settings.default_ai_api_url)).toString()
           : defaultBaseUrl;
-
-        const client = new OpenAI({
-          apiKey: settings.default_ai_api_key,
-          baseURL: validatedBaseUrl
-        });
+        const url = `${validatedBaseUrl.replace(/\/$/, '')}/chat/completions`;
 
         const modelName = settings.default_ai_model || defaultModel;
-        const requestParams = {
+        const requestBody = {
           model: modelName,
           messages: [{ role: 'user', content: prompt }],
           max_tokens: 50
         };
         if (!/^deepseek-reasoner/i.test(modelName)) {
-          requestParams.temperature = 0.1;
+          requestBody.temperature = 0.1;
         }
 
-        const response = await client.chat.completions.create(requestParams);
-        return response.choices[0]?.message?.content?.trim() || '';
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.default_ai_api_key}`
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`${isDeepseek ? 'DeepSeek' : 'Kimi'} CUSIP API error ${response.status}: ${errText.slice(0, 300)}`);
+        }
+
+        const data = await response.json();
+        return data.choices[0]?.message?.content?.trim() || '';
 
       } else if (settings.default_ai_provider === 'ollama') {
         const { default: fetch } = await import('node-fetch');
