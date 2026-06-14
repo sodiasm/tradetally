@@ -22,7 +22,7 @@ class AIProvider {
         return this.generateGemini(prompt, apiKey, modelName, options);
 
       case 'openai':
-        return this.generateOpenAI(prompt, apiKey, modelName, 'https://api.openai.com/v1', options);
+        return this.generateOpenAI(prompt, apiKey, modelName, apiUrl || 'https://api.openai.com/v1', options);
 
       case 'deepseek':
         if (!apiKey) {
