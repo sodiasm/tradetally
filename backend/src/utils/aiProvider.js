@@ -99,6 +99,10 @@ class AIProvider {
       throw new Error('Anthropic API key not configured');
     }
 
+    const controller = new AbortController();
+    const timeoutMs = options.timeoutMs || 60000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -111,7 +115,8 @@ class AIProvider {
           model: modelName,
           max_tokens: options.maxTokens || 4096,
           messages: [{ role: 'user', content: prompt }]
-        })
+        }),
+        signal: controller.signal
       });
 
       if (!response.ok) {
@@ -122,8 +127,14 @@ class AIProvider {
       const data = await response.json();
       return data.content[0].text;
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.error(`[AI_PROVIDER] Claude request timed out after ${timeoutMs}ms`);
+        throw new Error(`Claude API error: request timed out after ${timeoutMs}ms`);
+      }
       console.error('[AI_PROVIDER] Claude error:', error.message);
       throw new Error(`Claude API error: ${error.message}`);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -145,6 +156,10 @@ class AIProvider {
     }
 
     try {
+      const controller = new AbortController();
+      const timeoutMs = options.timeoutMs || 60000;
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+
       // Determine token parameter based on API target
       // OpenAI API uses max_completion_tokens; local/other APIs may still use max_tokens
       const isOpenAIAPI = apiUrl && apiUrl.includes('api.openai.com');
@@ -154,7 +169,7 @@ class AIProvider {
       // don't produce visible output. These models also reject custom
       // `temperature` — only the default is supported. Keep this regex in sync
       // with aiService.js.
-      const isReasoningModel = /^(o\d|gpt-5|deepseek-reasoner)/i.test(modelName);
+      const isReasoningModel = /^(o\d|gpt-5|deepseek-reasoner)/i.test(modelName) || /deepseek-v\d|deepseek-ai\/|reasoner|\br1\b/i.test(modelName);
       const tokenLimit = options.maxTokens || (isReasoningModel ? 16384 : 4096);
 
       const tokenParam = isOpenAIAPI
@@ -183,8 +198,11 @@ class AIProvider {
       const response = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: controller.signal
       });
+
+      clearTimeout(timer);
 
       if (!response.ok) {
         let errorMessage = `HTTP ${response.status}`;
@@ -209,6 +227,7 @@ class AIProvider {
       const choice = data.choices[0];
       const content = choice.message?.content
         || choice.text
+        || choice.message?.reasoning_content
         || choice.message?.refusal;
 
       // Some models return content in the top-level output field
@@ -221,6 +240,10 @@ class AIProvider {
 
       return finalContent;
     } catch (error) {
+      if (error.name === 'AbortError') {
+        console.error(`[AI_PROVIDER] OpenAI-compatible request to ${apiUrl} timed out`);
+        throw new Error(`AI Provider error: request to ${apiUrl} timed out`);
+      }
       console.error('[AI_PROVIDER] OpenAI-compatible API error:', error.message);
 
       // Provide helpful error for connection issues
