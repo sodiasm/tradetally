@@ -44,6 +44,9 @@ class BrokerConnection {
       externalUserId,
       brokerEnvironment,
       brokerMetadata,
+      alpacaApiKeyId,
+      alpacaApiSecret,
+      alpacaAuthType = null,
       accountLabel = null,
       autoSyncEnabled = false,
       syncFrequency = 'daily',
@@ -57,6 +60,8 @@ class BrokerConnection {
     const encryptedSchwabRefresh = schwabRefreshToken ? encryptionService.encrypt(schwabRefreshToken) : null;
     const encryptedOAuthAccess = oauthAccessToken ? encryptionService.encrypt(oauthAccessToken) : null;
     const encryptedOAuthRefresh = oauthRefreshToken ? encryptionService.encrypt(oauthRefreshToken) : null;
+    const encryptedAlpacaKeyId = alpacaApiKeyId ? encryptionService.encrypt(alpacaApiKeyId) : null;
+    const encryptedAlpacaSecret = alpacaApiSecret ? encryptionService.encrypt(alpacaApiSecret) : null;
 
     let query;
     let params;
@@ -153,10 +158,11 @@ class BrokerConnection {
             oauth_access_token, oauth_refresh_token, oauth_token_expires_at,
             oauth_refresh_token_expires_at, oauth_scopes, external_account_id,
             external_user_id, broker_environment, broker_metadata, account_label,
-            auto_sync_enabled, sync_frequency, sync_time
+            auto_sync_enabled, sync_frequency, sync_time,
+            alpaca_api_key_id, alpaca_api_secret, alpaca_auth_type
           )
-          VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-          ON CONFLICT (user_id, (COALESCE(broker_environment, 'live'))) WHERE broker_type = 'alpaca' DO UPDATE SET
+          VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          ON CONFLICT (user_id, (COALESCE(broker_environment, 'live')), external_account_id) WHERE broker_type = 'alpaca' AND external_account_id IS NOT NULL DO UPDATE SET
             oauth_access_token = EXCLUDED.oauth_access_token,
             oauth_refresh_token = EXCLUDED.oauth_refresh_token,
             oauth_token_expires_at = EXCLUDED.oauth_token_expires_at,
@@ -169,6 +175,9 @@ class BrokerConnection {
             auto_sync_enabled = EXCLUDED.auto_sync_enabled,
             sync_frequency = EXCLUDED.sync_frequency,
             sync_time = EXCLUDED.sync_time,
+            alpaca_api_key_id = EXCLUDED.alpaca_api_key_id,
+            alpaca_api_secret = EXCLUDED.alpaca_api_secret,
+            alpaca_auth_type = EXCLUDED.alpaca_auth_type,
             connection_status = 'pending',
             consecutive_failures = 0,
             updated_at = CURRENT_TIMESTAMP
@@ -183,6 +192,10 @@ class BrokerConnection {
         JSON.stringify(brokerMetadata || {}), accountLabel, autoSyncEnabled,
         syncFrequency, syncTime
       ];
+
+      if (brokerType === 'alpaca') {
+        params.push(encryptedAlpacaKeyId, encryptedAlpacaSecret, alpacaAuthType);
+      }
     }
 
     const result = await db.query(query, params);
@@ -589,12 +602,23 @@ class BrokerConnection {
       connection.externalUserId = row.external_user_id;
       connection.brokerEnvironment = row.broker_environment;
       connection.brokerMetadata = row.broker_metadata || {};
+      if (row.broker_type === 'alpaca') {
+        connection.alpacaAuthType = row.alpaca_auth_type || (row.oauth_access_token ? 'oauth' : null);
+      }
       if (includeCredentials) {
         if (row.oauth_access_token) {
           connection.oauthAccessToken = encryptionService.decrypt(row.oauth_access_token);
         }
         if (row.oauth_refresh_token) {
           connection.oauthRefreshToken = encryptionService.decrypt(row.oauth_refresh_token);
+        }
+        if (row.broker_type === 'alpaca') {
+          if (row.alpaca_api_key_id) {
+            connection.alpacaApiKeyId = encryptionService.decrypt(row.alpaca_api_key_id);
+          }
+          if (row.alpaca_api_secret) {
+            connection.alpacaApiSecret = encryptionService.decrypt(row.alpaca_api_secret);
+          }
         }
       }
     }
