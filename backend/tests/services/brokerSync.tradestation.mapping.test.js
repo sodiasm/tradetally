@@ -38,6 +38,7 @@ jest.mock('../../src/config/database', () => ({
 }));
 
 const axios = require('axios');
+const db = require('../../src/config/database');
 const tradestationService = require('../../src/services/brokerSync/tradestationService');
 
 /** Builds a TradeStation execution leg the way fetchExecutions emits them. */
@@ -478,6 +479,26 @@ describe('TradeStation dedupe behavior (OAuthBrokerBase.isDuplicateTrade)', () =
     existing.entry_price = 410.3; // field-equality check fails, orderId match still catches it
 
     expect(tradestationService.isDuplicateTrade(trade, [existing])).toBe(true);
+  });
+
+  test('same shaped trade from a different account identifier is NOT a duplicate', () => {
+    const trade = buildRoundTripTrade();
+    const existing = asExistingRow(buildRoundTripTrade());
+    existing.account_identifier = '****9999';
+
+    expect(tradestationService.isDuplicateTrade(trade, [existing])).toBe(false);
+  });
+
+  test('existing trade lookup can be scoped to the broker connection being imported', async () => {
+    const trade = buildRoundTripTrade();
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    await tradestationService.getExistingTrades('user-1', [trade], 'connection-a');
+
+    const [query, params] = db.query.mock.calls[0];
+    expect(query).toContain('broker_connection_id');
+    expect(query).toContain('AND broker_connection_id = $4');
+    expect(params).toEqual(['user-1', '2026-03-06', '2026-03-06', 'connection-a']);
   });
 
   test('a different fill (different order IDs, prices, quantity) is NOT a duplicate', () => {

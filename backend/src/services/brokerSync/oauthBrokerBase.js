@@ -295,7 +295,7 @@ class OAuthBrokerBase {
     let skipped = 0;
     let failed = 0;
     let duplicates = 0;
-    const existingTrades = await this.getExistingTrades(userId, trades);
+    const existingTrades = await this.getExistingTrades(userId, trades, connectionId);
 
     for (const tradeData of trades) {
       try {
@@ -324,7 +324,8 @@ class OAuthBrokerBase {
           pnl: tradeData.pnl,
           executions: tradeData.executionData,
           instrument_type: tradeData.instrumentType || 'stock',
-          account_identifier: tradeData.accountIdentifier || null
+          account_identifier: tradeData.accountIdentifier || null,
+          broker_connection_id: connectionId
         });
       } catch (error) {
         console.error(`[${this.config.logPrefix}] Failed to import trade:`, error.message);
@@ -339,7 +340,7 @@ class OAuthBrokerBase {
     return { imported, skipped, failed, duplicates };
   }
 
-  async getExistingTrades(userId, incomingTrades = []) {
+  async getExistingTrades(userId, incomingTrades = [], connectionId = null) {
     if (!incomingTrades.length) return [];
     const dates = incomingTrades
       .map(trade => toDateOnly(trade.tradeDate || trade.entryTime || trade.exitTime))
@@ -352,11 +353,17 @@ class OAuthBrokerBase {
       rangeClause = 'AND trade_date >= $2 AND trade_date <= $3';
     }
 
+    let connectionClause = '';
+    if (connectionId) {
+      params.push(connectionId);
+      connectionClause = `AND broker_connection_id = $${params.length}`;
+    }
+
     const result = await db.query(
       `SELECT symbol, side, quantity, entry_price, exit_price, entry_time, exit_time,
-              executions, trade_date, pnl, instrument_type, account_identifier
+              executions, trade_date, pnl, instrument_type, account_identifier, broker_connection_id
          FROM trades
-        WHERE user_id = $1 ${rangeClause}`,
+        WHERE user_id = $1 ${rangeClause} ${connectionClause}`,
       params
     );
     return result.rows;
@@ -367,6 +374,10 @@ class OAuthBrokerBase {
       if (String(existing.symbol).toUpperCase() !== String(newTrade.symbol).toUpperCase()) return false;
       if (existing.side !== newTrade.side) return false;
       if (toDateOnly(existing.trade_date) !== toDateOnly(newTrade.tradeDate)) return false;
+
+      const existingAccount = existing.account_identifier || '';
+      const newAccount = newTrade.accountIdentifier || '';
+      if ((existingAccount || newAccount) && existingAccount !== newAccount) return false;
 
       const qtyMatch = Math.abs(Number(existing.quantity) - Number(newTrade.quantity)) < 0.0001;
       const entryMatch = Math.abs(Number(existing.entry_price || 0) - Number(newTrade.entryPrice || 0)) < 0.0001;
