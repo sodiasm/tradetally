@@ -82,6 +82,33 @@ describe('AlpacaService API-key authentication', () => {
     );
   });
 
+  test('uses connection metadata account number as accountIdentifier when Alpaca order lacks account_id', async () => {
+    axios.get.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'order-1',
+          symbol: 'AAPL',
+          side: 'buy',
+          filled_qty: '3',
+          filled_avg_price: '101.25',
+          filled_at: '2026-06-18T14:30:00Z'
+        }
+      ]
+    });
+
+    const executions = await alpacaService.fetchExecutions(null, {
+      alpacaAuthType: 'api_key',
+      alpacaApiKeyId: 'PK-TEST',
+      alpacaApiSecret: 'SECRET-TEST',
+      brokerEnvironment: 'paper',
+      brokerMetadata: { accountNumber: '****VIBF' }
+    }, {});
+
+    expect(executions).toHaveLength(1);
+    const fill = alpacaService.mapExecutionToFill(executions[0]);
+    expect(fill.accountIdentifier).toBe('****VIBF');
+  });
+
   test('fetchExecutions preserves OAuth bearer headers for OAuth Alpaca connections', async () => {
     axios.get.mockResolvedValueOnce({ data: [] });
 

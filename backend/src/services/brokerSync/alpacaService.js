@@ -82,6 +82,7 @@ class AlpacaService extends OAuthBrokerBase {
 
   async fetchExecutions(accessToken, connection, { startDate, endDate } = {}) {
     const environment = connection.brokerEnvironment || 'live';
+    const connectionAccountIdentifier = connection.brokerMetadata?.accountNumber || null;
     const response = await axios.get(`${getApiBase(environment)}/v2/orders`, {
       headers: this.getHeadersForConnection(accessToken, connection),
       params: {
@@ -97,7 +98,9 @@ class AlpacaService extends OAuthBrokerBase {
     const orders = Array.isArray(response.data) ? response.data : [];
     return orders.flatMap(order => {
       const fills = order.fills || order.legs || [];
-      return fills.length ? fills.map(fill => ({ ...fill, _order: order })) : [order];
+      return fills.length
+        ? fills.map(fill => ({ ...fill, _order: { ...order, _accountIdentifier: connectionAccountIdentifier }, _accountIdentifier: connectionAccountIdentifier }))
+        : [{ ...order, _accountIdentifier: connectionAccountIdentifier }];
     });
   }
 
@@ -122,7 +125,7 @@ class AlpacaService extends OAuthBrokerBase {
       commission: 0,
       fees: 0,
       instrumentType: 'stock',
-      accountIdentifier: order.account_id ? `****${String(order.account_id).slice(-4)}` : null,
+      accountIdentifier: order.account_id ? `****${String(order.account_id).slice(-4)}` : (execution._accountIdentifier || order._accountIdentifier || null),
       orderId: orderId ? String(orderId) : null
     };
   }
