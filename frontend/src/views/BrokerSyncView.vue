@@ -158,8 +158,8 @@
             <!-- Alpaca Live Card -->
             <div
               class="p-6 border-2 rounded-lg transition-colors"
-              :class="brokerCardClass('alpaca', 'live')"
-              @click="canConnectBroker('alpaca', 'live') && handleBrokerOAuthConnect('alpaca', { environment: 'live' })"
+              :class="alpacaApiKeyCardClass('live')"
+              @click="!brokerConnecting.alpacaLive && openAlpacaApiKeyModal('live')"
             >
               <div class="flex items-center space-x-4">
                 <div class="flex-shrink-0 w-12 h-12 bg-cyan-100 dark:bg-cyan-900/30 rounded-lg flex items-center justify-center">
@@ -169,7 +169,7 @@
                 <div>
                   <h4 class="font-medium text-gray-900 dark:text-white">Alpaca Live</h4>
                   <p class="text-sm text-gray-500 dark:text-gray-400">
-                    {{ brokerConnection('alpaca', 'live') ? 'Already connected' : brokerConnecting.alpacaLive ? 'Connecting...' : 'Connect via OAuth' }}
+                    {{ alpacaConnectionCount('live') > 0 ? `Add another live account (${alpacaConnectionCount('live')} connected)` : 'Connect with API key' }}
                   </p>
                 </div>
               </div>
@@ -178,8 +178,8 @@
             <!-- Alpaca Paper Card -->
             <div
               class="p-6 border-2 rounded-lg transition-colors"
-              :class="brokerCardClass('alpaca', 'paper')"
-              @click="canConnectBroker('alpaca', 'paper') && handleBrokerOAuthConnect('alpaca', { environment: 'paper' })"
+              :class="alpacaApiKeyCardClass('paper')"
+              @click="!brokerConnecting.alpacaPaper && openAlpacaApiKeyModal('paper')"
             >
               <div class="flex items-center space-x-4">
                 <div class="flex-shrink-0 w-12 h-12 bg-sky-100 dark:bg-sky-900/30 rounded-lg flex items-center justify-center">
@@ -189,7 +189,7 @@
                 <div>
                   <h4 class="font-medium text-gray-900 dark:text-white">Alpaca Paper</h4>
                   <p class="text-sm text-gray-500 dark:text-gray-400">
-                    {{ brokerConnection('alpaca', 'paper') ? 'Already connected' : brokerConnecting.alpacaPaper ? 'Connecting...' : 'Connect via OAuth' }}
+                    {{ alpacaConnectionCount('paper') > 0 ? `Add another paper account (${alpacaConnectionCount('paper')} connected)` : 'Connect with API key' }}
                   </p>
                 </div>
               </div>
@@ -283,6 +283,16 @@
       :error="store.error"
     />
 
+    <!-- Alpaca API Key Connection Modal -->
+    <AlpacaApiKeyConnectionModal
+      v-if="showAlpacaApiKeyModal"
+      :environment="selectedAlpacaEnvironment"
+      @close="closeAlpacaApiKeyModal"
+      @save="handleAlpacaApiKeySave"
+      :loading="store.loading"
+      :error="store.error"
+    />
+
     <!-- Settings Modal -->
     <ConnectionSettingsModal
       v-if="showSettingsModal"
@@ -302,6 +312,7 @@ import { useTradesStore } from '@/stores/trades'
 import { useNotification } from '@/composables/useNotification'
 import BrokerConnectionCard from '@/components/broker-sync/BrokerConnectionCard.vue'
 import IBKRConnectionModal from '@/components/broker-sync/IBKRConnectionModal.vue'
+import AlpacaApiKeyConnectionModal from '@/components/broker-sync/AlpacaApiKeyConnectionModal.vue'
 import ConnectionSettingsModal from '@/components/broker-sync/ConnectionSettingsModal.vue'
 import IBKRNoticeBanner from '@/components/broker-sync/IBKRNoticeBanner.vue'
 import ProUpgradePrompt from '@/components/ProUpgradePrompt.vue'
@@ -338,6 +349,8 @@ const graceEndsAtFormatted = computed(() => {
 const pricingLink = computed(() => `/pricing?redirect=${encodeURIComponent(route.fullPath)}`)
 
 const showIBKRModal = ref(false)
+const showAlpacaApiKeyModal = ref(false)
+const selectedAlpacaEnvironment = ref('paper')
 const showSettingsModal = ref(false)
 const selectedConnection = ref(null)
 const successMessage = ref('')
@@ -373,6 +386,20 @@ function brokerCardClass(broker, environment = null) {
   return canConnectBroker(broker, environment)
     ? 'border-dashed border-gray-300 dark:border-gray-600 hover:border-primary-500 dark:hover:border-primary-400 cursor-pointer'
     : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 opacity-50 cursor-not-allowed'
+}
+
+function alpacaConnectionCount(environment) {
+  return store.connections.filter(connection =>
+    connection.brokerType === 'alpaca' &&
+    (connection.brokerEnvironment || 'live') === environment
+  ).length
+}
+
+function alpacaApiKeyCardClass(environment) {
+  const key = pendingKeyFor('alpaca', { environment })
+  return brokerConnecting.value[key]
+    ? 'border-primary-300 dark:border-primary-700 bg-primary-50/50 dark:bg-primary-900/10 cursor-wait'
+    : 'border-dashed border-gray-300 dark:border-gray-600 hover:border-primary-500 dark:hover:border-primary-400 cursor-pointer'
 }
 
 function scheduleSuccessMessage(message) {
@@ -455,6 +482,17 @@ function closeIBKRModal() {
   showIBKRModal.value = false
 }
 
+function openAlpacaApiKeyModal(environment) {
+  store.clearError()
+  selectedAlpacaEnvironment.value = environment
+  showAlpacaApiKeyModal.value = true
+}
+
+function closeAlpacaApiKeyModal() {
+  store.clearError()
+  showAlpacaApiKeyModal.value = false
+}
+
 function openSettingsModal(connection) {
   selectedConnection.value = connection
   showSettingsModal.value = true
@@ -467,6 +505,20 @@ async function handleIBKRSave(credentials) {
     scheduleSuccessMessage('IBKR connection added successfully!')
   } catch (error) {
     // Error is handled by store
+  }
+}
+
+async function handleAlpacaApiKeySave(credentials) {
+  const key = pendingKeyFor('alpaca', { environment: credentials.environment })
+  try {
+    brokerConnecting.value[key] = true
+    await store.addAlpacaApiKeyConnection(credentials)
+    showAlpacaApiKeyModal.value = false
+    scheduleSuccessMessage('Alpaca account connected successfully. Ready to sync trades.')
+  } catch (error) {
+    // Error is handled by store
+  } finally {
+    brokerConnecting.value[key] = false
   }
 }
 

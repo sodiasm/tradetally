@@ -112,6 +112,33 @@ export const useBrokerSyncStore = defineStore('brokerSync', () => {
     }
   }
 
+  async function addAlpacaApiKeyConnection(credentials) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await api.post('/broker-sync/connections/alpaca/api-key', {
+        environment: credentials.environment || 'live',
+        accountLabel: credentials.accountLabel || '',
+        apiKeyId: credentials.apiKeyId,
+        apiSecret: credentials.apiSecret,
+        autoSyncEnabled: credentials.autoSyncEnabled || false,
+        syncFrequency: credentials.syncFrequency || 'manual',
+        syncTime: credentials.syncTime || '06:00:00',
+        syncStartDate: credentials.syncStartDate || null
+      })
+
+      await fetchConnections()
+      return response.data.data
+    } catch (err) {
+      console.error('[BROKER-SYNC] Failed to add Alpaca API-key connection:', err)
+      error.value = err.response?.data?.error || 'Failed to add Alpaca connection'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function updateConnection(connectionId, updates) {
     loading.value = true
     error.value = null
@@ -280,6 +307,7 @@ export const useBrokerSyncStore = defineStore('brokerSync', () => {
     addIBKRConnection,
     initSchwabOAuth,
     initBrokerOAuth,
+    addAlpacaApiKeyConnection,
     updateConnection,
     deleteConnection,
     deleteBrokerTrades,
