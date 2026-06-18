@@ -6,6 +6,12 @@ jest.mock('../../src/models/BrokerConnection', () => ({
   findById: jest.fn()
 }));
 
+jest.mock('../../src/models/Account', () => ({
+  create: jest.fn(),
+  findByUser: jest.fn(),
+  getEarliestTradeDate: jest.fn()
+}));
+
 jest.mock('../../src/services/brokerSync/alpacaService', () => ({
   getAccountWithApiKey: jest.fn()
 }));
@@ -28,6 +34,7 @@ jest.mock('../../src/config/database', () => ({
 }));
 
 const BrokerConnection = require('../../src/models/BrokerConnection');
+const Account = require('../../src/models/Account');
 const alpacaService = require('../../src/services/brokerSync/alpacaService');
 const TierService = require('../../src/services/tierService');
 const brokerSyncController = require('../../src/controllers/brokerSync.controller');
@@ -62,6 +69,9 @@ describe('brokerSyncController.addAlpacaApiKeyConnection', () => {
       alpacaAuthType: 'api_key',
       connectionStatus: 'active'
     });
+    Account.create.mockResolvedValue({ id: 'account-1' });
+    Account.findByUser.mockResolvedValue([]);
+    Account.getEarliestTradeDate.mockResolvedValue(null);
   });
 
   test('validates credentials with Alpaca, creates API-key broker connection, and returns sanitized connection', async () => {
@@ -109,6 +119,15 @@ describe('brokerSyncController.addAlpacaApiKeyConnection', () => {
       'active',
       'Alpaca API key connection successful'
     );
+    expect(Account.create).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      accountName: 'Strategy A Paper',
+      accountIdentifier: '****5678',
+      broker: 'alpaca',
+      initialBalance: 0,
+      initialBalanceDate: expect.any(String),
+      isPrimary: false,
+      notes: expect.stringContaining('Alpaca broker sync connection')
+    }));
     expect(res.statusCode).toBe(201);
     expect(res.payload).toMatchObject({
       success: true,
@@ -120,6 +139,29 @@ describe('brokerSyncController.addAlpacaApiKeyConnection', () => {
     });
     expect(JSON.stringify(res.payload)).not.toContain('SECRET-TEST');
     expect(JSON.stringify(res.payload)).not.toContain('PK-TEST');
+  });
+
+  test('does not auto-create duplicate managed account when the Alpaca identifier already exists', async () => {
+    Account.findByUser.mockResolvedValueOnce([
+      { id: 'account-existing', account_identifier: '****5678' }
+    ]);
+
+    const req = {
+      user: { id: 'user-1' },
+      headers: { host: 'tradetally.local' },
+      body: {
+        environment: 'paper',
+        accountLabel: 'Strategy A Paper',
+        apiKeyId: 'PK-TEST',
+        apiSecret: 'SECRET-TEST'
+      }
+    };
+    const res = createRes();
+
+    await brokerSyncController.addAlpacaApiKeyConnection(req, res, jest.fn());
+
+    expect(res.statusCode).toBe(201);
+    expect(Account.create).not.toHaveBeenCalled();
   });
 
   test('rejects users without broker-sync access', async () => {

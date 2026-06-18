@@ -4,6 +4,7 @@
  */
 
 const BrokerConnection = require('../models/BrokerConnection');
+const Account = require('../models/Account');
 const ibkrService = require('../services/brokerSync/ibkrService');
 const schwabService = require('../services/brokerSync/schwabService');
 const tradestationService = require('../services/brokerSync/tradestationService');
@@ -237,6 +238,36 @@ const brokerSyncController = {
       });
 
       await BrokerConnection.updateStatus(connection.id, 'active', 'Alpaca API key connection successful');
+
+      if (maskedAccountNumber) {
+        try {
+          const existingAccounts = await Account.findByUser(userId);
+          const managedAccountExists = existingAccounts.some(account => (
+            account.account_identifier === maskedAccountNumber ||
+            account.accountIdentifier === maskedAccountNumber
+          ));
+
+          if (!managedAccountExists) {
+            const today = new Date().toISOString().split('T')[0];
+            const existingEarliestTradeDate = await Account.getEarliestTradeDate(userId, maskedAccountNumber);
+            const initialBalanceDate = existingEarliestTradeDate
+              ? new Date(existingEarliestTradeDate).toISOString().split('T')[0]
+              : today;
+
+            await Account.create(userId, {
+              accountName: resolvedLabel,
+              accountIdentifier: maskedAccountNumber,
+              broker: 'alpaca',
+              initialBalance: 0,
+              initialBalanceDate,
+              isPrimary: false,
+              notes: `Auto-created from Alpaca broker sync connection ${connection.id}`
+            });
+          }
+        } catch (accountError) {
+          logger.logError('Error auto-creating Alpaca managed account:', accountError);
+        }
+      }
 
       if (autoSyncEnabled && syncFrequency !== 'manual') {
         const nextSync = BrokerConnection.calculateNextSync(syncFrequency, syncTime);
