@@ -24,7 +24,6 @@ jest.mock('../../src/models/BrokerConnection', () => ({
 }));
 
 jest.mock('../../src/services/analyticsCache', () => ({
-  invalidateUserCache: jest.fn(),
   invalidate: jest.fn()
 }));
 
