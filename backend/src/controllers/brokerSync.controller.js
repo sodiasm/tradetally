@@ -172,6 +172,93 @@ const brokerSyncController = {
   },
 
   /**
+   * Add Alpaca API-key connection
+   */
+  async addAlpacaApiKeyConnection(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const {
+        apiKeyId,
+        apiSecret,
+        environment = 'live',
+        accountLabel = null,
+        autoSyncEnabled = false,
+        syncFrequency = 'manual',
+        syncTime = '06:00:00',
+        syncStartDate = null
+      } = req.body;
+
+      const access = await TierService.canCreateBrokerConnection(userId, req.headers?.host);
+      if (!access.allowed) {
+        return sendProRequired(res, access);
+      }
+
+      let account;
+      try {
+        account = await alpacaService.getAccountWithApiKey(apiKeyId, apiSecret, environment);
+      } catch (error) {
+        if ([401, 403].includes(error.response?.status)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid Alpaca API credentials'
+          });
+        }
+        throw error;
+      }
+
+      const externalAccountId = account.id || account.account_number;
+      if (!externalAccountId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Unable to determine Alpaca account id'
+        });
+      }
+
+      const maskedAccountNumber = redactAccountNumber(account.account_number);
+      const resolvedLabel = accountLabel || ['Alpaca', environment, maskedAccountNumber].filter(Boolean).join(' ');
+
+      const connection = await BrokerConnection.create(userId, {
+        brokerType: 'alpaca',
+        alpacaAuthType: 'api_key',
+        alpacaApiKeyId: apiKeyId,
+        alpacaApiSecret: apiSecret,
+        externalAccountId: String(externalAccountId),
+        brokerEnvironment: environment,
+        brokerMetadata: {
+          accountNumber: maskedAccountNumber,
+          status: account.status || null,
+          authType: 'api_key'
+        },
+        accountLabel: resolvedLabel,
+        autoSyncEnabled,
+        syncFrequency,
+        syncTime,
+        syncStartDate
+      });
+
+      await BrokerConnection.updateStatus(connection.id, 'active', 'Alpaca API key connection successful');
+
+      if (autoSyncEnabled && syncFrequency !== 'manual') {
+        const nextSync = BrokerConnection.calculateNextSync(syncFrequency, syncTime);
+        if (nextSync) {
+          await BrokerConnection.update(connection.id, { nextScheduledSync: nextSync });
+        }
+      }
+
+      const updatedConnection = await BrokerConnection.findById(connection.id, false);
+
+      res.status(201).json({
+        success: true,
+        data: updatedConnection,
+        message: 'Alpaca account added successfully'
+      });
+    } catch (error) {
+      logger.logError('Error adding Alpaca API key connection:', error);
+      next(error);
+    }
+  },
+
+  /**
    * Initialize Schwab OAuth flow
    */
   async initSchwabOAuth(req, res, next) {

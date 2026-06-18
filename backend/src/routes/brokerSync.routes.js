@@ -40,6 +40,9 @@ router.get('/connections/:id/logs', brokerSyncController.getSyncLogs);
 // Add IBKR connection
 router.post('/connections/ibkr', brokerSyncLimiter, validate(schemas.brokerSyncIbkrConnection), brokerSyncController.addIBKRConnection);
 
+// Add Alpaca API-key connection
+router.post('/connections/alpaca/api-key', brokerSyncLimiter, validate(schemas.brokerSyncAlpacaApiKeyConnection), brokerSyncController.addAlpacaApiKeyConnection);
+
 // Initialize Schwab OAuth flow
 router.post('/connections/schwab/init', brokerSyncLimiter, brokerSyncController.initSchwabOAuth);
 

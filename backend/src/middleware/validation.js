@@ -718,6 +718,17 @@ const schemas = {
     syncStartDate: nullableDate
   }),
 
+  brokerSyncAlpacaApiKeyConnection: Joi.object({
+    apiKeyId: Joi.string().trim().required(),
+    apiSecret: Joi.string().trim().required(),
+    environment: Joi.string().valid('live', 'paper').default('live'),
+    accountLabel: nullableString(255),
+    autoSyncEnabled: Joi.boolean().default(false),
+    syncFrequency: Joi.string().valid('manual', 'hourly', 'daily', 'weekly').default('manual'),
+    syncTime: nullableString(10),
+    syncStartDate: nullableDate
+  }),
+
   brokerSyncConnectionUpdate: Joi.object({
     accountLabel: nullableString(255),
     autoSyncEnabled: Joi.boolean(),
