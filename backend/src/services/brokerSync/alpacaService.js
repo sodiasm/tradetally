@@ -48,10 +48,42 @@ class AlpacaService extends OAuthBrokerBase {
     return response.data || {};
   }
 
+  async getAccountWithApiKey(apiKeyId, apiSecret, environment = 'live') {
+    const response = await axios.get(`${getApiBase(environment)}/v2/account`, {
+      headers: this.getApiKeyHeaders(apiKeyId, apiSecret)
+    });
+    return response.data || {};
+  }
+
+  getApiKeyHeaders(apiKeyId, apiSecret) {
+    if (!apiKeyId || !apiSecret) {
+      throw new Error('Missing Alpaca API key credentials');
+    }
+    return {
+      'APCA-API-KEY-ID': apiKeyId,
+      'APCA-API-SECRET-KEY': apiSecret
+    };
+  }
+
+  getHeadersForConnection(accessToken, connection = {}) {
+    if (connection.alpacaAuthType === 'api_key') {
+      return this.getApiKeyHeaders(connection.alpacaApiKeyId, connection.alpacaApiSecret);
+    }
+    return { Authorization: `Bearer ${accessToken}` };
+  }
+
+  async ensureValidToken(connection) {
+    if (connection.alpacaAuthType === 'api_key') {
+      this.getApiKeyHeaders(connection.alpacaApiKeyId, connection.alpacaApiSecret);
+      return { accessToken: null, needsReauth: false };
+    }
+    return super.ensureValidToken(connection);
+  }
+
   async fetchExecutions(accessToken, connection, { startDate, endDate } = {}) {
     const environment = connection.brokerEnvironment || 'live';
     const response = await axios.get(`${getApiBase(environment)}/v2/orders`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: this.getHeadersForConnection(accessToken, connection),
       params: {
         status: 'all',
         limit: 500,
